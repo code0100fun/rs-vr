@@ -1,13 +1,17 @@
-extern crate io_bluetooth;
-
 use std::io;
 use std::iter;
 
 use io_bluetooth::bt::{self, BtStream};
 
-fn main() -> io::Result<()> {
+fn main() {
+    list_usb_devices().unwrap();
+    list_bluetooth_devices().unwrap();
+}
+
+fn list_bluetooth_devices() -> io::Result<()> {
+    println!("Scanning Bluetooth...");
     let devices = bt::discover_devices()?;
-    println!("Devices:");
+    println!("Bluetooth Devices:");
     for (idx, device) in devices.iter().enumerate() {
         println!("{}: {}", idx, *device);
     }
@@ -56,4 +60,20 @@ fn request_device_idx(len: usize) -> io::Result<usize> {
         buffer.clear();
         println!("Invalid index. Please try again.");
     }
+}
+
+fn list_usb_devices() -> io::Result<()> {
+    println!("Scanning USB...");
+    let context = rusb::Context::new().unwrap();
+    println!("USB Devices:");
+    for device in context.devices().unwrap().iter() {
+        let device_desc = device.device_descriptor().unwrap();
+
+        println!("Bus {:03} Device {:03} ID {:04x}:{:04x}",
+            device.bus_number(),
+            device.address(),
+            device_desc.vendor_id(),
+            device_desc.product_id());
+    }
+    Ok(())
 }
