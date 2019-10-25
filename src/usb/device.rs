@@ -9,6 +9,8 @@ use winapi::um::handleapi::{
 };
 
 use winapi::um::setupapi::{
+    SPDRP_CLASS,
+    SPDRP_DRIVER,
     HDEVINFO,
     SP_DEVICE_INTERFACE_DATA,
     SP_DEVINFO_DATA,
@@ -18,6 +20,8 @@ use winapi::um::setupapi::{
     SetupDiGetDeviceInterfaceDetailA,
     SetupDiEnumDeviceInterfaces,
     SetupDiGetClassDevsA,
+    SetupDiEnumDeviceInfo,
+    SetupDiGetDeviceRegistryPropertyA,
 };
 
 use std::ptr;
@@ -33,6 +37,8 @@ pub fn enumerate(_vendor_id: u16, _product_id: u16) -> io::Result<Device> {
 
 fn get_windows_usb_device_detail() -> io::Result<()> {
     let device_info_set = get_device_info_set().unwrap();
+    let has_hid = has_hid_driver_bound(device_info_set);
+    println!("has_hid: {}", has_hid);
     let mut device_index = 0;
     let mut has_next = true;
     while has_next {
@@ -90,6 +96,7 @@ fn has_more_devices(device_info_set: HDEVINFO, device_index: u32, device_interfa
 
 // This will always return false even if there was no OS error
 // https://stackoverflow.com/questions/1054748/setupdigetdeviceinterfacedetail-unexplainable-error
+// https://docs.microsoft.com/en-us/windows/win32/api/setupapi/nf-setupapi-setupdigetdeviceinterfacedetaila#remarks
 fn get_device_detail_size(device_info_set: HDEVINFO, device_interface_data: &mut SP_DEVICE_INTERFACE_DATA) -> io::Result<u32> {
     let mut detail_size: u32 = 0;
     unsafe {
@@ -132,6 +139,70 @@ fn get_device_detail(
     } else {
         Err(io::Error::last_os_error())
     }
+}
+
+fn has_hid_driver_bound(device_info_set: HDEVINFO) -> bool {
+    // iterate device info looking for bound HIDClass
+    // https://github.com/signal11/hidapi/blob/a6a622ffb680c55da0de787ff93b80280498330f/windows/hid.c#L345
+    let mut has_hid_driver = false;
+    for info_index in 0.. {
+
+        let mut driver_name: [u8; 256] = unsafe { std::mem::zeroed() };
+        let mut dev_info_data = create_devinfo_data();
+
+        let has_next_info = TRUE == unsafe { SetupDiEnumDeviceInfo(device_info_set, info_index, &mut dev_info_data) };
+
+        if !has_next_info {
+            break;
+        }
+
+        // get device class
+        let result = TRUE == unsafe {
+            SetupDiGetDeviceRegistryPropertyA(
+                device_info_set,
+                &mut dev_info_data,
+                SPDRP_CLASS,
+                ptr::null_mut(),
+                driver_name.as_mut_ptr(),
+                std::mem::size_of_val(&driver_name) as u32,
+                ptr::null_mut()
+            )
+        };
+
+        if !result {
+            // no device class so skip the name lookup
+            continue;
+        }
+
+        let class_name = bytes_to_str(&driver_name);
+        println!("device_class: {}", class_name);
+
+        if class_name != "HIDClass" {
+            continue;
+        }
+
+        // get device driver name
+        let result = TRUE == unsafe {
+            SetupDiGetDeviceRegistryPropertyA(
+                device_info_set,
+                &mut dev_info_data,
+                SPDRP_DRIVER,
+                ptr::null_mut(),
+                driver_name.as_mut_ptr(),
+                std::mem::size_of_val(&driver_name) as u32,
+                ptr::null_mut()
+            )
+        };
+
+        if result {
+            has_hid_driver = true;
+            let driver_name_str = bytes_to_str(&driver_name);
+            println!("driver_name: {}", driver_name_str);
+            break;
+        }
+    }
+
+    has_hid_driver
 }
 
 // ------
