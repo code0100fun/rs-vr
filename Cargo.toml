@@ -19,5 +19,5 @@ io_bluetooth = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [
-    "setupapi", "usbiodef"
+    "setupapi", "usbiodef", "hidsdi"
 ] }

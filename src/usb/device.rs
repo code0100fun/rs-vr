@@ -1,11 +1,16 @@
 use std::io;
 
 use winapi::shared::minwindef::{TRUE};
+use winapi::shared::hidsdi::{
+    HidD_GetAttributes,
+    HIDD_ATTRIBUTES,
+};
 use winapi::shared::usbiodef::{
     GUID_DEVINTERFACE_USB_DEVICE
 };
 use winapi::um::handleapi::{
-    INVALID_HANDLE_VALUE
+    INVALID_HANDLE_VALUE,
+    CloseHandle
 };
 use winapi::um::winnt::{
     HANDLE, LPCSTR,
@@ -73,8 +78,28 @@ fn get_windows_usb_device_detail() -> io::Result<()> {
 
         let device_path = device_path_for_data(&device_interface_detail_data);
 
-        let handle = open_device(str_to_os_str(device_path).as_ptr(), true).unwrap();
-        println!("handle: {:?}", handle);
+        let write_handle = open_device(str_to_os_str(device_path).as_ptr(), true).unwrap();
+        println!("write_handle : {:?}", write_handle);
+
+        if write_handle == INVALID_HANDLE_VALUE {
+            // could not open device
+            continue;
+        }
+
+        let mut hid_attribs: HIDD_ATTRIBUTES = HIDD_ATTRIBUTES {
+            ProductID: 0,
+            VendorID: 0,
+            VersionNumber: 0,
+            Size: std::mem::size_of::<HIDD_ATTRIBUTES>() as u32,
+        };
+        let mut hid_attribs: HIDD_ATTRIBUTES = unsafe { std::mem::zeroed() };
+        hid_attribs.Size = std::mem::size_of::<HIDD_ATTRIBUTES>() as u32;
+        unsafe {
+            HidD_GetAttributes(write_handle, &mut hid_attribs);
+        }
+        println!("vid: 0x{:x}, pid: 0x{:x}, version: {}", hid_attribs.VendorID, hid_attribs.ProductID, hid_attribs.VersionNumber);
+
+        close_device(write_handle).unwrap();
 
         device_index += 1;
     }
@@ -252,6 +277,15 @@ fn open_device(device_path: LPCSTR, enumerate: bool) -> io::Result<HANDLE> {
         Err(io::Error::last_os_error())
     } else {
         Ok(handle)
+    }
+}
+
+fn close_device(handle: HANDLE) -> io::Result<()> {
+    let result = TRUE == unsafe { CloseHandle(handle) };
+    if result {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
     }
 }
 
