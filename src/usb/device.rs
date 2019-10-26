@@ -63,12 +63,12 @@ fn get_windows_usb_device_detail() -> io::Result<()> {
         let mut device_interface_detail_data = create_device_interface_detail_data();
 
         has_next = has_more_devices(device_info_set, device_index, &mut device_interface_data);
-
         if !has_next {
             break;
         }
 
         let detail_size = get_device_detail_size(device_info_set, &mut device_interface_data).unwrap();
+
         get_device_detail(
             device_info_set,
             &mut device_interface_data,
@@ -76,7 +76,10 @@ fn get_windows_usb_device_detail() -> io::Result<()> {
             detail_size
         ).unwrap();
 
-        let device_path = device_path_for_data(&device_interface_detail_data);
+        let device_path = device_interface_detail_data.device_path();
+        // println!("device_path : {:?}", device_path);
+        // println!("_native part: {:?}", unsafe { std::slice::from_raw_parts(device_interface_detail_data._native.DevicePath.as_ptr(), 4) } );
+        // println!("device_path_mem: {:?}", unsafe { std::slice::from_raw_parts(device_interface_detail_data._device_path_mem.as_ptr(), 100) } );
 
         let write_handle = open_device(str_to_os_str(device_path).as_ptr(), true).unwrap();
         println!("write_handle : {:?}", write_handle);
@@ -112,11 +115,9 @@ fn bytes_to_str(bytes: &[u8]) -> &str {
 }
 
 fn str_to_os_str(s: &str) -> Vec<i8> {
-    let prepend = vec![92i8, 92, 63, 92]; // why is this prepended on the DevicePath???
     let append = vec![0i8]; // terminate with 0
     let mut s_bytes = vec![];
     let bytes: &[i8] = unsafe { std::mem::transmute(s.as_bytes()) };
-    s_bytes.extend(prepend);
     s_bytes.extend(bytes.to_vec());
     s_bytes.extend(append);
     s_bytes
@@ -295,29 +296,32 @@ fn close_device(handle: HANDLE) -> io::Result<()> {
 
 struct DeviceInterfaceDetailData {
     _native: SP_DEVICE_INTERFACE_DETAIL_DATA_A,
-    device_path_mem: [u8; 100],
+    _device_path_mem: [u8; 100], // could actually be 4 bytes smaller but meh
 }
 
-fn create_device_interface_detail_data() -> DeviceInterfaceDetailData {
-    let device_interface_detail_data: SP_DEVICE_INTERFACE_DETAIL_DATA_A;
-    // HACK!!! This is a really hacky way to get a chunk of memory for the device detail data
-    let device_path_mem: [u8; 100] = unsafe { std::mem::zeroed() }; // hardcode 100 for now
-    device_interface_detail_data = SP_DEVICE_INTERFACE_DETAIL_DATA_A {
-        cbSize: std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_A>() as u32,
-        DevicePath: unsafe {
-            *std::mem::transmute::<*const i8, &[i8; 1]>(device_path_mem.as_ptr() as *const i8)
-        }
-    };
-
-    DeviceInterfaceDetailData {
-        _native: device_interface_detail_data,
-        device_path_mem: device_path_mem, // the device_path will be stored here
+impl DeviceInterfaceDetailData {
+    fn device_path(&self) -> &str {
+        // Remember when we did that thing there...
+        let device_path_bytes = unsafe {
+            // read all the way through the end of the _native part into the
+            // _device_path_mem region
+            std::slice::from_raw_parts(self._native.DevicePath.as_ptr() as *const u8, 100)
+        };
+        bytes_to_str(device_path_bytes)
     }
 }
 
-fn device_path_for_data(device_interface_detail_data: &DeviceInterfaceDetailData) -> &str {
-    // Remember when we did that thing up there...
-    bytes_to_str(&device_interface_detail_data.device_path_mem)
+fn create_device_interface_detail_data() -> DeviceInterfaceDetailData {
+    let device_interface_detail_data = SP_DEVICE_INTERFACE_DETAIL_DATA_A {
+        cbSize: std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_A>() as u32,
+        DevicePath: [0],
+    };
+
+    // HACK!!! This is a really hacky way to get a chunk of memory for the device detail data
+    DeviceInterfaceDetailData {
+        _native: device_interface_detail_data,
+        _device_path_mem: unsafe { std::mem::zeroed() }, // the device_path will overflow and be stored here
+    }
 }
 
 fn create_device_interface_data() -> SP_DEVICE_INTERFACE_DATA {
