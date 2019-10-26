@@ -64,19 +64,16 @@ fn get_windows_usb_device_detail() -> io::Result<()> {
         }
 
         let detail_size = get_device_detail_size(device_info_set, &mut device_interface_data).unwrap();
-        // let mut native_detail = device_interface_detail_data._native;
-        get_device_detail(device_info_set, &mut device_interface_data, &mut device_interface_detail_data._native, detail_size).unwrap();
+        get_device_detail(
+            device_info_set,
+            &mut device_interface_data,
+            &mut device_interface_detail_data._native,
+            detail_size
+        ).unwrap();
 
-        let device_name = bytes_to_str(&device_interface_detail_data.device_path_mem);
+        let device_path = device_path_for_data(&device_interface_detail_data);
 
-        let prepend = vec![92, 92, 63, 92]; // why is this prepended on the DevicePath???
-        let append = vec![0]; // terminate with 0
-        let mut device_path_bytes = vec![];
-        device_path_bytes.extend(prepend);
-        device_path_bytes.extend(device_name.as_bytes().to_vec());
-        device_path_bytes.extend(append);
-
-        let handle = open_device(device_path_bytes.as_ptr() as *const i8, true).unwrap();
+        let handle = open_device(str_to_os_str(device_path).as_ptr(), true).unwrap();
         println!("handle: {:?}", handle);
 
         device_index += 1;
@@ -89,13 +86,15 @@ fn bytes_to_str(bytes: &[u8]) -> &str {
     &std::str::from_utf8(bytes).unwrap()[0..first_null]
 }
 
-fn str_to_os_str(s: &str) -> Vec<u16> {
-    use std::ffi::OsStr;
-    use std::iter::once;
-    use std::os::windows::ffi::OsStrExt;
-
-    let os_str: Vec<u16> = OsStr::new(s).encode_wide().chain(once(0)).collect();
-    os_str
+fn str_to_os_str(s: &str) -> Vec<i8> {
+    let prepend = vec![92i8, 92, 63, 92]; // why is this prepended on the DevicePath???
+    let append = vec![0i8]; // terminate with 0
+    let mut s_bytes = vec![];
+    let bytes: &[i8] = unsafe { std::mem::transmute(s.as_bytes()) };
+    s_bytes.extend(prepend);
+    s_bytes.extend(bytes.to_vec());
+    s_bytes.extend(append);
+    s_bytes
 }
 
 // ------
@@ -235,7 +234,6 @@ fn has_hid_driver_bound(device_info_set: HDEVINFO) -> bool {
 }
 
 fn open_device(device_path: LPCSTR, enumerate: bool) -> io::Result<HANDLE> {
-    // println!("open_device: {:?} {:?}", str_to_bytes(device_path), bytes_to_str(str_to_bytes(device_path).as_slice()));
     let desired_access = if enumerate { 0 } else { GENERIC_WRITE | GENERIC_READ };
     let share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE;
     // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea
@@ -267,16 +265,15 @@ struct DeviceInterfaceDetailData {
 }
 
 fn create_device_interface_detail_data() -> DeviceInterfaceDetailData {
-    let mut device_interface_detail_data: SP_DEVICE_INTERFACE_DETAIL_DATA_A;
+    let device_interface_detail_data: SP_DEVICE_INTERFACE_DETAIL_DATA_A;
     // HACK!!! This is a really hacky way to get a chunk of memory for the device detail data
-    let mut device_path_mem: [u8; 100] = unsafe { std::mem::zeroed() }; // hardcode 100 for now
+    let device_path_mem: [u8; 100] = unsafe { std::mem::zeroed() }; // hardcode 100 for now
     device_interface_detail_data = SP_DEVICE_INTERFACE_DETAIL_DATA_A {
         cbSize: std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_A>() as u32,
         DevicePath: unsafe {
             *std::mem::transmute::<*const i8, &[i8; 1]>(device_path_mem.as_ptr() as *const i8)
         }
     };
-    // device_interface_detail_data.cbSize = std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_A>() as u32;
 
     DeviceInterfaceDetailData {
         _native: device_interface_detail_data,
