@@ -40,6 +40,7 @@ use winapi::um::setupapi::{
 };
 
 use std::ptr;
+use std::fmt;
 
 pub const GUID_DEVINTERFACE_USB: GUID = GUID {
     Data1: 0x4d1e55b2,
@@ -48,72 +49,167 @@ pub const GUID_DEVINTERFACE_USB: GUID = GUID {
     Data4: [0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30],
 };
 
-pub struct Device {
-
+#[derive(Default, Debug)]
+pub struct HIDDeviceInfo {
+    vendor_id: u16,
+    product_id: u16,
+    release_number: u16,
+    interface_number: u16,
+    path: String,
+    class: String,
+    driver_name: String,
+    serial_number: String,
+    manufacturer_string: String,
+    product_string: String,
 }
 
-pub fn enumerate(_vendor_id: u16, _product_id: u16) -> io::Result<Device> {
-    get_windows_usb_device_detail().unwrap();
-    Ok(Device {})
-}
-
-fn get_windows_usb_device_detail() -> io::Result<()> {
-    let device_info_set = get_device_info_set().unwrap();
-    let mut device_index = 0;
-    let mut has_next = true;
-    while has_next {
-        let mut device_interface_data = create_device_interface_data();
-        let mut device_interface_detail_data = create_device_interface_detail_data();
-
-        has_next = has_more_devices(device_info_set, device_index, &mut device_interface_data);
-        if !has_next {
-            break;
-        }
-
-        let detail_size = get_device_detail_size(device_info_set, &mut device_interface_data).unwrap();
-
-        get_device_detail(
-            device_info_set,
-            &mut device_interface_data,
-            &mut device_interface_detail_data._native,
-            detail_size
-        ).unwrap();
-
-        let device_path = device_interface_detail_data.device_path();
-
-
-        let has_hid = device_has_hid_driver_bound(device_info_set, device_index);
-        if !has_hid {
-            // this device does not have a HID driver bound
-            device_index += 1;
-            continue;
-        }
-
-        let write_handle = open_device(str_to_os_str(device_path).as_ptr(), true).unwrap();
-        if write_handle == INVALID_HANDLE_VALUE {
-            // could not open device
-            device_index += 1;
-            continue;
-        }
-
-        let mut hid_attribs: HIDD_ATTRIBUTES = HIDD_ATTRIBUTES {
-            ProductID: 0,
-            VendorID: 0,
-            VersionNumber: 0,
-            Size: std::mem::size_of::<HIDD_ATTRIBUTES>() as u32,
-        };
-        let mut hid_attribs: HIDD_ATTRIBUTES = unsafe { std::mem::zeroed() };
-        hid_attribs.Size = std::mem::size_of::<HIDD_ATTRIBUTES>() as u32;
-        unsafe {
-            HidD_GetAttributes(write_handle, &mut hid_attribs);
-        }
-        println!("vid: 0x{:x}, pid: 0x{:x}, version: {}", hid_attribs.VendorID, hid_attribs.ProductID, hid_attribs.VersionNumber);
-
-        close_device(write_handle).unwrap();
-
-        device_index += 1;
+impl fmt::Display for HIDDeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "vendor_id: {:#06x}, product_id: {:#06x}", self.vendor_id, self.product_id)
     }
-    Ok(())
+}
+
+pub struct HIDDeviceInfoIter {
+    index: u32,
+    device_info_set: Option<HDEVINFO>,
+}
+
+impl Iterator for HIDDeviceInfoIter {
+    type Item = io::Result<HIDDeviceInfo>;
+
+    fn next(&mut self) -> Option<io::Result<HIDDeviceInfo>> {
+        match self.device_info_set() {
+            Ok(device_info_set) => {
+                match get_next_hid_device_info(device_info_set, self.index) {
+                    (false, _, _) => {
+                        None // no more results
+                    }
+                    (_, index, Some(Ok(device_info))) => {
+                        self.index = index + 1; // may have skipped over non-HID devices
+                        Some(Ok(device_info))
+                    },
+                    (_, index, Some(Err(error))) => {
+                        self.index = index + 1; // may have skipped over non-HID devices
+                        Some(Err(error)) // an error, return it but keep going
+                    },
+                    _ => unreachable!(),
+                }
+            }
+            Err(_) => None, // can't iterate if we can't get this
+        }
+    }
+}
+
+impl HIDDeviceInfoIter {
+    fn device_info_set(&mut self) -> io::Result<HDEVINFO> {
+        match self.device_info_set {
+            None => {
+                match get_device_info_set() {
+                    Ok(device_info_set) => {
+                        self.device_info_set = Some(device_info_set);
+                        // fetch succeess
+                        Ok(device_info_set)
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Some(device_info_set) => Ok(device_info_set) // cache success
+        }
+    }
+}
+
+pub fn hid_enumerate_all() -> HIDDeviceInfoIter {
+    HIDDeviceInfoIter {
+        index: 0,
+        device_info_set: None,
+    }
+}
+
+fn get_next_hid_device_info(device_info_set: HDEVINFO, index: u32) -> (bool, u32, Option<io::Result<HIDDeviceInfo>>) {
+    // get device at index
+    // open and get info
+    // is it the correct vendor/product
+    // no then skip and try again
+    // yes then build result
+    let mut curr_index = index;
+    let result;
+    loop {
+        match get_device_info(device_info_set, curr_index) {
+            (true, None) => {
+                curr_index += 1; // not a HID device so go to the next one
+            }
+            (true, Some(ok_or_error)) => {
+                result = (true, curr_index, Some(ok_or_error)); // we found a HID device
+                break;
+            }
+            (false, None) => {
+                result = (false, curr_index, None); // no more devices
+                break;
+            }
+            _ => unreachable!(),
+        }
+    }
+    result
+}
+
+fn get_device_info(device_info_set: HDEVINFO, device_index: u32) -> (bool, Option<io::Result<HIDDeviceInfo>>) {
+    let has_next;
+    let mut device_interface_data = create_device_interface_data();
+    let mut device_interface_detail_data = create_device_interface_detail_data();
+
+    has_next = has_more_devices(device_info_set, device_index, &mut device_interface_data);
+    if !has_next {
+        return (has_next, None);
+    }
+
+    let detail_size = get_device_detail_size(device_info_set, &mut device_interface_data).unwrap();
+
+    get_device_detail(
+        device_info_set,
+        &mut device_interface_data,
+        &mut device_interface_detail_data._native,
+        detail_size
+    ).unwrap();
+
+    let device_path = device_interface_detail_data.device_path();
+
+    let has_hid = device_has_hid_driver_bound(device_info_set, device_index);
+    if !has_hid {
+        // this device does not have a HID driver bound
+        return (has_next, None);
+    }
+
+    let write_handle = match open_device(str_to_os_str(device_path).as_ptr(), true) {
+        Ok(handle) if handle == INVALID_HANDLE_VALUE => {
+            // could not open device
+            let error = io::Error::new(io::ErrorKind::Other, "got invalid handle to device");
+            return (has_next, Some(Err(error)))
+        }
+        Ok(handle) => handle, // success
+        Err(error) => return (has_next, Some(Err(error))),
+    };
+
+    let mut device_info = HIDDeviceInfo::default();
+
+    let hid_attribs: HIDD_ATTRIBUTES = HIDD_ATTRIBUTES {
+        ProductID: 0,
+        VendorID: 0,
+        VersionNumber: 0,
+        Size: std::mem::size_of::<HIDD_ATTRIBUTES>() as u32,
+    };
+    let mut hid_attribs: HIDD_ATTRIBUTES = unsafe { std::mem::zeroed() };
+    hid_attribs.Size = std::mem::size_of::<HIDD_ATTRIBUTES>() as u32;
+    unsafe {
+        HidD_GetAttributes(write_handle, &mut hid_attribs);
+    }
+    device_info.vendor_id = hid_attribs.VendorID;
+    device_info.product_id = hid_attribs.ProductID;
+    device_info.release_number = hid_attribs.VersionNumber;
+
+    close_device(write_handle).unwrap();
+
+    // return device
+    (has_next, Some(Ok(device_info)))
 }
 
 fn bytes_to_str(bytes: &[u8]) -> &str {
@@ -202,19 +298,8 @@ fn get_device_detail(
     }
 }
 
-fn has_hid_driver_bound(device_info_set: HDEVINFO) -> bool {
-    // iterate device info looking for bound HIDClass
-    // https://github.com/signal11/hidapi/blob/a6a622ffb680c55da0de787ff93b80280498330f/windows/hid.c#L345
-    let mut has_hid_driver = false;
-    for info_index in 0.. {
-        if device_has_hid_driver_bound(device_info_set, info_index) {
-            has_hid_driver = true;
-            break;
-        }
-    }
-    has_hid_driver
-}
-
+// check device for bound HIDClass driver
+// https://github.com/signal11/hidapi/blob/a6a622ffb680c55da0de787ff93b80280498330f/windows/hid.c#L345
 fn device_has_hid_driver_bound(device_info_set: HDEVINFO, info_index: u32) -> bool {
     let mut driver_name: [u8; 256] = unsafe { std::mem::zeroed() };
     let mut dev_info_data = create_devinfo_data();
@@ -244,8 +329,6 @@ fn device_has_hid_driver_bound(device_info_set: HDEVINFO, info_index: u32) -> bo
     }
 
     let class_name = bytes_to_str(&driver_name);
-    println!("device_class: {}", class_name);
-
     if class_name != "HIDClass" {
         return false
     }
@@ -264,8 +347,8 @@ fn device_has_hid_driver_bound(device_info_set: HDEVINFO, info_index: u32) -> bo
     };
 
     if result {
-        let driver_name_str = bytes_to_str(&driver_name);
-        println!("driver_name: {}", driver_name_str);
+        // TODO: return this in device_info
+        // let driver_name_str = bytes_to_str(&driver_name);
         return true
     } else {
         return false
