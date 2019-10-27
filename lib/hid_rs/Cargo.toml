@@ -1,22 +1,12 @@
 [package]
-name = "rsvr"
+name = "hid-rs"
 version = "0.1.0"
 authors = ["Chase McCarthy <chase@code0100fun.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-name = "rsvr"
+name = "hid_rs"
 path = "src/lib.rs"
-
-[[bin]]
-name = "rsvr"
-path = "src/main.rs"
-
-[dependencies]
-io_bluetooth = "0.1"
-hid-rs = { path = "./lib/hid_rs" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [

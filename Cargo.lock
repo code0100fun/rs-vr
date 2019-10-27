@@ -16,6 +16,13 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "hid-rs"
+version = "0.1.0"
+dependencies = [
+ "winapi 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "io_bluetooth"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -57,6 +64,7 @@ dependencies = [
 name = "rsvr"
 version = "0.1.0"
 dependencies = [
+ "hid-rs 0.1.0",
  "io_bluetooth 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

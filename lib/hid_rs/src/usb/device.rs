@@ -42,6 +42,7 @@ use winapi::um::setupapi::{
 use std::ptr;
 use std::fmt;
 
+// page 4 of https://www.ftdichip.com/Support/Documents/AppNotes/AN_152_Detecting_USB_%20Device_Insertion_and_Removal.pdf
 pub const GUID_DEVINTERFACE_USB: GUID = GUID {
     Data1: 0x4d1e55b2,
     Data2: 0xf16f,
