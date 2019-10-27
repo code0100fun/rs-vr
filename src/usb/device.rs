@@ -51,16 +51,16 @@ pub const GUID_DEVINTERFACE_USB: GUID = GUID {
 
 #[derive(Default, Debug)]
 pub struct HIDDeviceInfo {
-    vendor_id: u16,
-    product_id: u16,
-    release_number: u16,
-    interface_number: u16,
-    path: String,
-    class: String,
-    driver_name: String,
-    serial_number: String,
-    manufacturer_string: String,
-    product_string: String,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub release_number: u16,
+    pub interface_number: u16,
+    pub path: String,
+    pub class: String,
+    pub driver_name: String,
+    pub serial_number: String,
+    pub manufacturer_string: String,
+    pub product_string: String,
 }
 
 impl fmt::Display for HIDDeviceInfo {
