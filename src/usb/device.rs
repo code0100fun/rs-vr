@@ -5,9 +5,7 @@ use winapi::shared::hidsdi::{
     HidD_GetAttributes,
     HIDD_ATTRIBUTES,
 };
-use winapi::shared::usbiodef::{
-    GUID_DEVINTERFACE_USB_DEVICE
-};
+use winapi::shared::guiddef::{GUID};
 use winapi::um::handleapi::{
     INVALID_HANDLE_VALUE,
     CloseHandle
@@ -43,6 +41,13 @@ use winapi::um::setupapi::{
 
 use std::ptr;
 
+pub const GUID_DEVINTERFACE_USB: GUID = GUID {
+    Data1: 0x4d1e55b2,
+    Data2: 0xf16f,
+    Data3: 0x11cf,
+    Data4: [0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30],
+};
+
 pub struct Device {
 
 }
@@ -54,8 +59,6 @@ pub fn enumerate(_vendor_id: u16, _product_id: u16) -> io::Result<Device> {
 
 fn get_windows_usb_device_detail() -> io::Result<()> {
     let device_info_set = get_device_info_set().unwrap();
-    let has_hid = has_hid_driver_bound(device_info_set);
-    println!("has_hid: {}", has_hid);
     let mut device_index = 0;
     let mut has_next = true;
     while has_next {
@@ -77,15 +80,19 @@ fn get_windows_usb_device_detail() -> io::Result<()> {
         ).unwrap();
 
         let device_path = device_interface_detail_data.device_path();
-        // println!("device_path : {:?}", device_path);
-        // println!("_native part: {:?}", unsafe { std::slice::from_raw_parts(device_interface_detail_data._native.DevicePath.as_ptr(), 4) } );
-        // println!("device_path_mem: {:?}", unsafe { std::slice::from_raw_parts(device_interface_detail_data._device_path_mem.as_ptr(), 100) } );
+
+
+        let has_hid = device_has_hid_driver_bound(device_info_set, device_index);
+        if !has_hid {
+            // this device does not have a HID driver bound
+            device_index += 1;
+            continue;
+        }
 
         let write_handle = open_device(str_to_os_str(device_path).as_ptr(), true).unwrap();
-        println!("write_handle : {:?}", write_handle);
-
         if write_handle == INVALID_HANDLE_VALUE {
             // could not open device
+            device_index += 1;
             continue;
         }
 
@@ -129,7 +136,7 @@ fn str_to_os_str(s: &str) -> Vec<i8> {
 
 fn get_device_info_set() -> io::Result<HDEVINFO> {
     match unsafe {
-        SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, ptr::null(), ptr::null_mut(), DIGCF_PRESENT | DIGCF_DEVICEINTERFACE)
+        SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB, ptr::null(), ptr::null_mut(), DIGCF_PRESENT | DIGCF_DEVICEINTERFACE)
     } {
         d if d == INVALID_HANDLE_VALUE => Err(io::Error::last_os_error()),
         device_info_set => Ok(device_info_set),
@@ -141,7 +148,7 @@ fn has_more_devices(device_info_set: HDEVINFO, device_index: u32, device_interfa
         SetupDiEnumDeviceInterfaces(
             device_info_set,
             ptr::null_mut(),
-            &GUID_DEVINTERFACE_USB_DEVICE,
+            &GUID_DEVINTERFACE_USB,
             device_index,
             device_interface_data
         )
@@ -200,67 +207,74 @@ fn has_hid_driver_bound(device_info_set: HDEVINFO) -> bool {
     // https://github.com/signal11/hidapi/blob/a6a622ffb680c55da0de787ff93b80280498330f/windows/hid.c#L345
     let mut has_hid_driver = false;
     for info_index in 0.. {
-
-        let mut driver_name: [u8; 256] = unsafe { std::mem::zeroed() };
-        let mut dev_info_data = create_devinfo_data();
-
-        let has_next_info = TRUE == unsafe { SetupDiEnumDeviceInfo(device_info_set, info_index, &mut dev_info_data) };
-
-        if !has_next_info {
-            break;
-        }
-
-        // get device class
-        let result = TRUE == unsafe {
-            SetupDiGetDeviceRegistryPropertyA(
-                device_info_set,
-                &mut dev_info_data,
-                SPDRP_CLASS,
-                ptr::null_mut(),
-                driver_name.as_mut_ptr(),
-                std::mem::size_of_val(&driver_name) as u32,
-                ptr::null_mut()
-            )
-        };
-
-        if !result {
-            // no device class so skip the name lookup
-            continue;
-        }
-
-        let class_name = bytes_to_str(&driver_name);
-        println!("device_class: {}", class_name);
-
-        if class_name != "HIDClass" {
-            continue;
-        }
-
-        // get device driver name
-        let result = TRUE == unsafe {
-            SetupDiGetDeviceRegistryPropertyA(
-                device_info_set,
-                &mut dev_info_data,
-                SPDRP_DRIVER,
-                ptr::null_mut(),
-                driver_name.as_mut_ptr(),
-                std::mem::size_of_val(&driver_name) as u32,
-                ptr::null_mut()
-            )
-        };
-
-        if result {
+        if device_has_hid_driver_bound(device_info_set, info_index) {
             has_hid_driver = true;
-            let driver_name_str = bytes_to_str(&driver_name);
-            println!("driver_name: {}", driver_name_str);
             break;
         }
     }
-
     has_hid_driver
+}
+
+fn device_has_hid_driver_bound(device_info_set: HDEVINFO, info_index: u32) -> bool {
+    let mut driver_name: [u8; 256] = unsafe { std::mem::zeroed() };
+    let mut dev_info_data = create_devinfo_data();
+
+    let has_next_info = TRUE == unsafe { SetupDiEnumDeviceInfo(device_info_set, info_index, &mut dev_info_data) };
+
+    if !has_next_info {
+        return false
+    }
+
+    // get device class
+    let result = TRUE == unsafe {
+        SetupDiGetDeviceRegistryPropertyA(
+            device_info_set,
+            &mut dev_info_data,
+            SPDRP_CLASS,
+            ptr::null_mut(),
+            driver_name.as_mut_ptr(),
+            std::mem::size_of_val(&driver_name) as u32,
+            ptr::null_mut()
+        )
+    };
+
+    if !result {
+        // no device class so skip the name lookup
+        return false
+    }
+
+    let class_name = bytes_to_str(&driver_name);
+    println!("device_class: {}", class_name);
+
+    if class_name != "HIDClass" {
+        return false
+    }
+
+    // get device driver name
+    let result = TRUE == unsafe {
+        SetupDiGetDeviceRegistryPropertyA(
+            device_info_set,
+            &mut dev_info_data,
+            SPDRP_DRIVER,
+            ptr::null_mut(),
+            driver_name.as_mut_ptr(),
+            std::mem::size_of_val(&driver_name) as u32,
+            ptr::null_mut()
+        )
+    };
+
+    if result {
+        let driver_name_str = bytes_to_str(&driver_name);
+        println!("driver_name: {}", driver_name_str);
+        return true
+    } else {
+        return false
+    }
 }
 
 fn open_device(device_path: LPCSTR, enumerate: bool) -> io::Result<HANDLE> {
     let desired_access = if enumerate { 0 } else { GENERIC_WRITE | GENERIC_READ };
+    // https://github.com/signal11/hidapi/commit/b5b2e1779b6cd2edda3066bbbf0921a2d6b1c3c0
     let share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE;
     // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea
     let handle = unsafe {
