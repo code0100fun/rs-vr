@@ -95,6 +95,7 @@ pub fn get_device_info(device_info_set: HDEVINFO, device_index: u32) -> (bool, O
     device_info.vendor_id = hid_attribs.VendorID;
     device_info.product_id = hid_attribs.ProductID;
     device_info.release_number = hid_attribs.VersionNumber;
+    device_info.path = String::from(device_path);
 
     close_device(write_handle).unwrap();
 

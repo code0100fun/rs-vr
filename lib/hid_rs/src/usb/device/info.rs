@@ -21,6 +21,6 @@ pub struct HIDDeviceInfo {
 
 impl Display for HIDDeviceInfo {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "vendor_id: {:#06x}, product_id: {:#06x}", self.vendor_id, self.product_id)
+        write!(f, "vendor_id: {:#06x}, product_id: {:#06x}, path: {}", self.vendor_id, self.product_id, self.path)
     }
 }
