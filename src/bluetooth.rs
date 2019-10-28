@@ -1,7 +1,6 @@
 use winapi::um::bluetoothapis::{
     BLUETOOTH_FIND_RADIO_PARAMS,
     BLUETOOTH_RADIO_INFO,
-    BLUETOOTH_ADDRESS,
     BluetoothFindFirstRadio,
     BluetoothFindRadioClose,
     BluetoothGetRadioInfo,
@@ -17,10 +16,14 @@ use io_bluetooth::bt::{self, BtStream};
 use std::io;
 use std::iter;
 
+use crate::utils::{
+    long_address_to_string,
+};
+
 pub fn get_host_address() -> io::Result<String> {
     let bt_handle = find_first_bluetooth_radio()?;
     let radio_info = get_radio_info(bt_handle)?;
-    Ok(bluetooth_address_to_string(radio_info.address))
+    Ok(long_address_to_string(radio_info.address))
 }
 
 fn get_radio_info(bt_handle: HANDLE) -> io::Result<BLUETOOTH_RADIO_INFO> {
@@ -43,13 +46,6 @@ fn find_first_bluetooth_radio() -> io::Result<HANDLE> {
         unsafe { BluetoothFindRadioClose(h_find) };
     }
     Ok(handle)
-}
-
-fn bluetooth_address_to_string(bt_address: BLUETOOTH_ADDRESS) -> String {
-    let addr = format!("{:012x}", bt_address);
-    let pairs: Vec<&[u8]> = addr.as_bytes().chunks(2).collect();
-    let pairs = pairs.join(&(':' as u8));
-    String::from_utf8(pairs).unwrap()
 }
 
 pub fn list_bluetooth_devices() -> io::Result<()> {

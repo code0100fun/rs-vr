@@ -22,7 +22,12 @@ use winapi::um::winbase::{
 
 use std::ptr;
 
-fn open_device(device_path: LPCSTR, enumerate: bool) -> io::Result<HANDLE> {
+#[derive(Debug)]
+pub struct HIDDevice {
+    pub handle: HANDLE,
+}
+
+pub fn open_device(device_path: LPCSTR, enumerate: bool) -> io::Result<HANDLE> {
     let desired_access = if enumerate { 0 } else { GENERIC_WRITE | GENERIC_READ };
     // https://github.com/signal11/hidapi/commit/b5b2e1779b6cd2edda3066bbbf0921a2d6b1c3c0
     let share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE;
