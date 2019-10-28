@@ -7,3 +7,6 @@ https://internals.rust-lang.org/t/ffi-types-with-unsized-arrays/5203
 
 ## How to Capture and Read HID Traces in Windows 8.1
 https://techcommunity.microsoft.com/t5/Microsoft-USB-Blog/How-to-Capture-and-Read-HID-Traces-in-Windows-8-1/ba-p/270839
+
+## PS4 Aux to USB A
+https://oshpark.com/shared_projects/0PjWmdWL
